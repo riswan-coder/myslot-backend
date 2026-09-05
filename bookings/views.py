@@ -42,6 +42,10 @@ class SlotViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         if self.action in ['list', 'retrieve']:
             return [AllowAny()]
+
+        if self.action in ['create', 'bulk_create']:
+            return [IsShopOwner()]
+
         return [IsShopOwner(), IsObjectOwner()]
 
     def get_queryset(self):
