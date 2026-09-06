@@ -7,8 +7,11 @@ from rest_framework.permissions import (
 )
 from rest_framework.response import Response
 
-from accounts.permissions import IsShopOwner, IsObjectOwner
-
+from accounts.permissions import (
+    IsShopOwner,
+    IsObjectOwner,
+    IsAdminOrShopOwner,
+)
 from .models import GamingCenter
 from .serializers import GamingCenterSerializer
 
@@ -80,10 +83,7 @@ class GamingCenterViewSet(viewsets.ModelViewSet):
 
         # Owner can delete own shop
         elif self.action == 'destroy':
-            permission_classes = [
-                IsShopOwner,
-                IsObjectOwner,
-            ]
+          permission_classes = [IsAdminOrShopOwner]
 
         # Owner can update own shop
         elif self.action in ['update', 'partial_update']:
