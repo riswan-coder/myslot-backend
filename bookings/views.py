@@ -11,6 +11,8 @@ from rest_framework.exceptions import PermissionDenied
 from games.models import Machine
 from rest_framework.views import APIView
 from datetime import datetime, timedelta
+from django.db.models import Sum, Count, Q
+from datetime import date as date_cls
 
 
 class GuestBookingCancelView(APIView):
@@ -190,6 +192,37 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking.save()
         return Response({'status': 'Booking marked as completed.', 'booking_id': booking.booking_id}) 
 
+    @action(detail=False, methods=['get'])
+    def stats(self, request):
+        user = request.user
+        if not (user.is_authenticated and user.role == 'owner'):
+            return Response({'error': 'Owner access only.'}, status=status.HTTP_403_FORBIDDEN)
+
+        base_qs = Booking.objects.filter(
+            slot__machine__game__shop__owner=user
+        ).exclude(status=Booking.Status.CANCELLED)
+
+        today = date_cls.today()
+        today_qs = base_qs.filter(slot__date=today)
+
+        result = {
+            'today_bookings': today_qs.count(),
+            'today_revenue': today_qs.aggregate(total=Sum('amount'))['total'] or 0,
+            'total_bookings': base_qs.count(),
+            'total_revenue': base_qs.aggregate(total=Sum('amount'))['total'] or 0,
+        }
+
+        start_date = request.query_params.get('start_date')
+        end_date = request.query_params.get('end_date')
+        if start_date and end_date:
+            range_qs = base_qs.filter(slot__date__gte=start_date, slot__date__lte=end_date)
+            result['range_bookings'] = range_qs.count()
+            result['range_revenue'] = range_qs.aggregate(total=Sum('amount'))['total'] or 0
+            result['range_start'] = start_date
+            result['range_end'] = end_date
+
+        return Response(result)
+    
 class GuestBookingLookupView(APIView):
     permission_classes = [AllowAny]
 
@@ -207,3 +240,5 @@ class GuestBookingLookupView(APIView):
 
         serializer = BookingSerializer(booking)
         return Response(serializer.data)
+
+
