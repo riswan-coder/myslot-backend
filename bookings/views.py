@@ -222,6 +222,37 @@ class BookingViewSet(viewsets.ModelViewSet):
             result['range_end'] = end_date
 
         return Response(result)
+
+    @action(detail=False, methods=['post'])
+    def owner_book(self, request):
+        user = request.user
+        if not (user.is_authenticated and user.role == 'owner'):
+            return Response({'error': 'Owner access only.'}, status=status.HTTP_403_FORBIDDEN)
+
+        slot_id = request.data.get('slot')
+        customer_name = request.data.get('customer_name', 'Walk-in Customer')
+
+        try:
+            slot = Slot.objects.get(id=slot_id, machine__game__shop__owner=user)
+        except Slot.DoesNotExist:
+            return Response({'error': 'Slot not found or not yours.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if slot.is_booked:
+            return Response({'error': 'This slot is already booked.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        with transaction.atomic():
+            booking = Booking.objects.create(
+                user=None,
+                guest_name=customer_name,
+                guest_phone='',
+                slot=slot,
+                amount=slot.price,
+            )
+            slot.is_booked = True
+            slot.save()
+
+        serializer = self.get_serializer(booking)
+        return Response(serializer.data, status=status.HTTP_201_CREATED)
     
 class GuestBookingLookupView(APIView):
     permission_classes = [AllowAny]
