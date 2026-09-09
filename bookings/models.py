@@ -40,6 +40,12 @@ class Booking(models.Model):
         null=True,
         blank=True,
     )
+
+    razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
+    razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
+    is_paid = models.BooleanField(default=False)
+
+
     guest_name = models.CharField(max_length=100, blank=True)
     guest_phone = models.CharField(max_length=15, blank=True)
     slot = models.OneToOneField(

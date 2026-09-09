@@ -13,6 +13,13 @@ from rest_framework.views import APIView
 from datetime import datetime, timedelta
 from django.db.models import Sum, Count, Q
 from datetime import date as date_cls
+import razorpay
+from django.conf import settings
+import hmac
+import hashlib
+
+
+razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
 
 class GuestBookingCancelView(APIView):
@@ -121,6 +128,99 @@ class SlotViewSet(viewsets.ModelViewSet):
             'skipped': skipped_count,
             'message': f'{created_count} slots created, {skipped_count} already existed.',
         })
+
+class CreatePaymentOrderView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        slot_id = request.data.get('slot')
+
+        try:
+            slot = Slot.objects.get(id=slot_id)
+        except Slot.DoesNotExist:
+            return Response({'error': 'Slot does not exist.'}, status=status.HTTP_404_NOT_FOUND)
+
+        if slot.is_booked:
+            return Response({'error': 'This slot is already booked.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        amount_paise = int(float(slot.price) * 100)  # Razorpay expects amount in paise
+
+        order = razorpay_client.order.create({
+            'amount': amount_paise,
+            'currency': 'INR',
+            'payment_capture': 1,
+        })
+
+        return Response({
+            'order_id': order['id'],
+            'amount': amount_paise,
+            'currency': 'INR',
+            'razorpay_key': settings.RAZORPAY_KEY_ID,
+        })
+
+class VerifyPaymentView(APIView):
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        razorpay_order_id = request.data.get('razorpay_order_id')
+        razorpay_payment_id = request.data.get('razorpay_payment_id')
+        razorpay_signature = request.data.get('razorpay_signature')
+
+        slot_id = request.data.get('slot')
+        guest_name = request.data.get('guest_name', '')
+        guest_phone = request.data.get('guest_phone', '')
+
+        generated_signature = hmac.new(
+            settings.RAZORPAY_KEY_SECRET.encode(),
+            f"{razorpay_order_id}|{razorpay_payment_id}".encode(),
+            hashlib.sha256
+        ).hexdigest()
+
+        if not hmac.compare_digest(
+            generated_signature,
+            razorpay_signature or ''
+        ):
+            return Response(
+                {'error': 'Payment verification failed.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        try:
+            slot = Slot.objects.get(id=slot_id)
+        except Slot.DoesNotExist:
+            return Response(
+                {'error': 'Slot does not exist.'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        if slot.is_booked:
+            return Response(
+                {'error': 'This slot is already booked.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        with transaction.atomic():
+            booking = Booking.objects.create(
+                user=None,
+                guest_name=guest_name,
+                guest_phone=guest_phone,
+                slot=slot,
+                amount=slot.price,
+                payment_status=Booking.PaymentStatus.PAID,
+                razorpay_order_id=razorpay_order_id,
+                razorpay_payment_id=razorpay_payment_id,
+                razorpay_signature=razorpay_signature,
+            )
+
+            slot.is_booked = True
+            slot.save()
+
+        serializer = BookingSerializer(booking)
+
+        return Response(
+            serializer.data,
+            status=status.HTTP_201_CREATED
+        )
 
 
 
@@ -271,5 +371,4 @@ class GuestBookingLookupView(APIView):
 
         serializer = BookingSerializer(booking)
         return Response(serializer.data)
-
 

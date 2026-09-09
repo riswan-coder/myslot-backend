@@ -22,12 +22,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # ============================================================
 
 SECRET_KEY = config('SECRET_KEY')
+DEBUG = config('DEBUG', default=False, cast=bool)
 
-DEBUG = config(
-    'DEBUG',
-    default=True,
-    cast=bool
-)
+RAZORPAY_KEY_ID = config('RAZORPAY_KEY_ID')
+RAZORPAY_KEY_SECRET = config('RAZORPAY_KEY_SECRET')
 
 ALLOWED_HOSTS = [
     'localhost',
