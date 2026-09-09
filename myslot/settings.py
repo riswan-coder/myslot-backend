@@ -96,8 +96,15 @@ MIDDLEWARE = [
 # ============================================================
 
 CORS_ALLOWED_ORIGINS = [
-    "http://localhost:5173",
     "https://myslot-frontend.vercel.app",
+    "https://myslots.co.in",
+    "https://www.myslots.co.in",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "https://myslot-frontend.vercel.app",
+    "https://myslots.co.in",
+    "https://www.myslots.co.in",
 ]
 
 
