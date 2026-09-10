@@ -336,6 +336,50 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         return Response(result)
 
+    @action(detail=True, methods=['post'])
+    def cancel_and_refund(self, request, pk=None):
+        user = request.user
+        if not (user.is_authenticated and user.role == 'owner'):
+            return Response({'error': 'Owner access only.'}, status=status.HTTP_403_FORBIDDEN)
+
+        booking = self.get_object()
+
+        if booking.status != Booking.Status.UPCOMING:
+            return Response({'error': 'Only upcoming bookings can be cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        refund_info = None
+
+        if booking.is_paid and booking.razorpay_payment_id:
+            try:
+                amount_paise = int(float(booking.amount) * 100)
+                refund = razorpay_client.payment.refund(
+                    booking.razorpay_payment_id,
+                    {'amount': amount_paise}
+                )
+                refund_info = {
+                    'refund_id': refund['id'],
+                    'status': refund['status'],
+                    'amount': refund['amount'] / 100,
+                }
+            except Exception as e:
+                return Response(
+                    {'error': f'Refund failed: {str(e)}. Booking was not cancelled.'},
+                    status=status.HTTP_502_BAD_GATEWAY
+                )
+
+        with transaction.atomic():
+            booking.status = Booking.Status.CANCELLED
+            booking.save()
+            booking.slot.is_booked = False
+            booking.slot.save()
+
+        response_data = {'status': 'Booking cancelled.', 'booking_id': booking.booking_id}
+        if refund_info:
+            response_data['refund'] = refund_info
+
+        serializer_context = {'request': request}
+        return Response(response_data)
+
     @action(detail=False, methods=['post'])
     def owner_book(self, request):
         user = request.user
