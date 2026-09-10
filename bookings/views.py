@@ -22,6 +22,9 @@ import hashlib
 razorpay_client = razorpay.Client(auth=(settings.RAZORPAY_KEY_ID, settings.RAZORPAY_KEY_SECRET))
 
 
+from datetime import datetime, timedelta
+from django.utils import timezone
+
 class GuestBookingCancelView(APIView):
     permission_classes = [AllowAny]
 
@@ -36,6 +39,16 @@ class GuestBookingCancelView(APIView):
 
         if booking.status != Booking.Status.UPCOMING:
             return Response({'error': 'Only upcoming bookings can be cancelled.'}, status=status.HTTP_400_BAD_REQUEST)
+
+        slot_datetime = datetime.combine(booking.slot.date, booking.slot.start_time)
+        slot_datetime = timezone.make_aware(slot_datetime)
+        hours_until_slot = (slot_datetime - timezone.now()).total_seconds() / 3600
+
+        if hours_until_slot < 2:
+            return Response(
+                {'error': 'Cancellations are only allowed at least 2 hours before your slot. Please call the shop directly.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         with transaction.atomic():
             booking.status = Booking.Status.CANCELLED
