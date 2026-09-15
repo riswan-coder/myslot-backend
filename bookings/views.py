@@ -170,7 +170,7 @@ class CreatePaymentOrderView(APIView):
             'currency': 'INR',
             'razorpay_key': settings.RAZORPAY_KEY_ID,
         })
-
+    
 class VerifyPaymentView(APIView):
     permission_classes = [AllowAny]
 
@@ -180,24 +180,63 @@ class VerifyPaymentView(APIView):
         razorpay_signature = request.data.get('razorpay_signature')
 
         slot_id = request.data.get('slot')
-        guest_name = request.data.get('guest_name', '')
-        guest_phone = request.data.get('guest_phone', '')
+        guest_name = request.data.get('guest_name', '').strip()
+        guest_phone = request.data.get('guest_phone', '').strip()
 
+        # ---------------------------------------------------------
+        # Validate required fields
+        # ---------------------------------------------------------
+        if not razorpay_order_id:
+            return Response(
+                {'error': 'Razorpay order ID is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not razorpay_payment_id:
+            return Response(
+                {'error': 'Razorpay payment ID is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not razorpay_signature:
+            return Response(
+                {'error': 'Razorpay signature is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not slot_id:
+            return Response(
+                {'error': 'Slot is required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if not guest_name or not guest_phone:
+            return Response(
+                {'error': 'Name and phone number are required.'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # ---------------------------------------------------------
+        # Verify Razorpay payment signature
+        # ---------------------------------------------------------
         generated_signature = hmac.new(
             settings.RAZORPAY_KEY_SECRET.encode(),
-            f"{razorpay_order_id}|{razorpay_payment_id}".encode(),
+            f'{razorpay_order_id}|{razorpay_payment_id}'.encode(),
             hashlib.sha256
         ).hexdigest()
 
         if not hmac.compare_digest(
             generated_signature,
-            razorpay_signature or ''
+            razorpay_signature
         ):
             return Response(
                 {'error': 'Payment verification failed.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
+        # ---------------------------------------------------------
+        # Get slot
+        # ---------------------------------------------------------
         try:
             slot = Slot.objects.get(id=slot_id)
         except Slot.DoesNotExist:
@@ -206,28 +245,71 @@ class VerifyPaymentView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
+        # ---------------------------------------------------------
+        # Check slot availability
+        # ---------------------------------------------------------
         if slot.is_booked:
             return Response(
                 {'error': 'This slot is already booked.'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        with transaction.atomic():
-            booking = Booking.objects.create(
-                user=None,
-                guest_name=guest_name,
-                guest_phone=guest_phone,
-                slot=slot,
-                amount=slot.price,
-                payment_status=Booking.PaymentStatus.PAID,
-                razorpay_order_id=razorpay_order_id,
-                razorpay_payment_id=razorpay_payment_id,
-                razorpay_signature=razorpay_signature,
+        # ---------------------------------------------------------
+        # Create booking
+        # ---------------------------------------------------------
+        try:
+            with transaction.atomic():
+
+                # Lock slot to prevent double booking
+                slot = Slot.objects.select_for_update().get(
+                    id=slot_id
+                )
+
+                # Check again after locking
+                if slot.is_booked:
+                    return Response(
+                        {'error': 'This slot is already booked.'},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+
+                booking = Booking.objects.create(
+                    user=(
+                        request.user
+                        if request.user.is_authenticated
+                        else None
+                    ),
+                    guest_name=guest_name,
+                    guest_phone=guest_phone,
+                    slot=slot,
+                    amount=slot.price,
+
+                    # Your actual Booking model fields
+                    is_paid=True,
+                    razorpay_order_id=razorpay_order_id,
+                    razorpay_payment_id=razorpay_payment_id,
+                )
+
+                # Mark slot as booked
+                slot.is_booked = True
+                slot.save(update_fields=['is_booked'])
+
+        except Exception as e:
+            print('========== BOOKING CREATION ERROR ==========')
+            print(repr(e))
+            print('============================================')
+
+            return Response(
+                {
+                    'error': 'Payment verified, but booking could not be created.',
+                    'details': str(e),
+                    'payment_id': razorpay_payment_id,
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
-            slot.is_booked = True
-            slot.save()
-
+        # ---------------------------------------------------------
+        # Return booking
+        # ---------------------------------------------------------
         serializer = BookingSerializer(booking)
 
         return Response(
