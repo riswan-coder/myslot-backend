@@ -41,6 +41,9 @@ class Booking(models.Model):
         blank=True,
     )
 
+    locked_until = models.DateTimeField(null=True, blank=True)
+    lock_token = models.CharField(max_length=36, null=True, blank=True)
+
     razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
     razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
     is_paid = models.BooleanField(default=False)
