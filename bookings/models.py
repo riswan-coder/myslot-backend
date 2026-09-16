@@ -16,6 +16,8 @@ class Slot(models.Model):
     end_time = models.TimeField()
     price = models.DecimalField(max_digits=8, decimal_places=2)
     is_booked = models.BooleanField(default=False)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    lock_token = models.CharField(max_length=36, null=True, blank=True)
 
     class Meta:
         unique_together = ('machine', 'date', 'start_time')
@@ -40,9 +42,6 @@ class Booking(models.Model):
         null=True,
         blank=True,
     )
-
-    locked_until = models.DateTimeField(null=True, blank=True)
-    lock_token = models.CharField(max_length=36, null=True, blank=True)
 
     razorpay_order_id = models.CharField(max_length=100, blank=True, null=True)
     razorpay_payment_id = models.CharField(max_length=100, blank=True, null=True)
